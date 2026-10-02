@@ -2664,7 +2664,7 @@ sAImsg *gHyp_instance_incomingMsg ( sInstance *pAI )
     gHyp_util_logDebug ( FRAME_DEPTH_NULL, DEBUG_DIAGNOSTICS,
     "Queue = Start [%d:%s], End [%d:%s]",
       pAI->msg.startQQ,
-      pAI->msg.qq[pAI->msg.startQQ]?gHyp_aimsg_tokensValues(pAI->msg.qq[pAI->msg.startQQ]):"empty"
+      pAI->msg.qq[pAI->msg.startQQ]?gHyp_aimsg_tokensValues(pAI->msg.qq[pAI->msg.startQQ]):"empty",
       pAI->msg.endQQ,
       pAI->msg.qq[pAI->msg.endQQ]?gHyp_aimsg_tokensValues(pAI->msg.qq[pAI->msg.endQQ]):"empty" ) ;
 
