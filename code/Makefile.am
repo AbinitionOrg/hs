@@ -49,15 +49,15 @@
 #
 #
 HS_BASENAME=hs@HS_MAJOR@@HS_MINOR@
-AUTOMAKE_OPTIONS = gnu 
 
 # ToDo: Make AS_<features> detectable and configurable
 ##CFLAGS = -g -O -Wall -DAS_SQL -DAS_MYSQL -DAS_SSL -DAS_GD
-CFLAGS = -g -O -Wall -Wno-unused -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -Wno-format-security -Wno-pointer-sign -Wno-unused-result -Wno-uninitialized -Wno-implicit-function-declaration
+AM_CFLAGS = -g -O -Wall -Wno-unused -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -Wno-format-security -Wno-pointer-sign -Wno-unused-result -Wno-uninitialized -Wno-implicit-function-declaration
 
 # ToDo: Add checks for each in configure.ac 
 ##LDADD = -lc -lm -lz -lmysqlclient -lssl -lcrypto -lgd -ljpeg 
-LDADD = -lc -lm -lz 
+# -lm and -lz are found and added to LIBS by configure.ac
+LDADD =
 
 bin_PROGRAMS = hs
 hs_SOURCES = hs.c aimsg.c data.c dateparse.c hash.c channel.c signal.c tcp.c util.c branch.c cgi.c env.c fileio.c frame.c function.c hsms.c http.c hyp.c concept.c instance.c label.c load.c memtrack.c method.c operand.c operator.c parse.c port.c promis.c route.c router.c secs.c secs1.c secs2.c sock.c sort.c ssl.c stack.c stmt.c system.c type.c sql.c gd.c
@@ -69,5 +69,9 @@ noinst_HEADERS = auto.h hypdef.h
 # man page
 #man_MANS = hs.1
 
+# make check: smoke tests against the freshly built binary
+TESTS = tests/smoke.sh
+AM_TESTS_ENVIRONMENT = HS=$(builddir)/hs; export HS;
+
 # extra files for the dist tarball
-EXTRA_DIST = router.hyp
+EXTRA_DIST = router.hyp $(TESTS)

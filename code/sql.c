@@ -500,6 +500,7 @@ void gHyp_sql_bind ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 		sword	results ;
 		sword	rc ; 
     ub2 dt ;
+    sb1 scale ;
     OCIStmt    *stmthp;
     OCIParam   *mypard;
 		char	dataBuffer[MAX_SQL_BUFFER_SIZE] ;
@@ -699,7 +700,20 @@ void gHyp_sql_bind ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 					                  (OCIError *) dbproc->errhp  );
 					lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
 
-					isFloat = (dataType == SQLT_NUM && precision > 38) ? TRUE : FALSE ;
+					rc = OCIAttrGet(	(dvoid*) mypard, 
+					                  (ub4) OCI_DTYPE_PARAM, 
+					                  (dvoid*) &scale,
+					                  (ub4 *) 0, 
+					                  (ub4) OCI_ATTR_SCALE, 
+					                  (OCIError *) dbproc->errhp  );
+					lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
+
+					/* NUMBER(p,s) is a FLOAT when it has digits right of the decimal point (s > 0).
+					 * Scale -127 means no fixed scale: an unconstrained NUMBER, FLOAT(n), or a
+					 * computed column such as AVG(x).  Those can hold fractions, so also FLOAT.
+					 * Otherwise (s <= 0) the value is integral and safe as a LONG.
+					 */
+					isFloat = (dataType == SQLT_NUM && (scale > 0 || scale == -127)) ? TRUE : FALSE ;
 
 					/* Retrieve the data width in characters */
 					rc = OCIAttrGet(	(dvoid*) mypard, 
@@ -1048,6 +1062,7 @@ void gHyp_sql_query ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 		OCILobLocator* pLobLocator[MAX_SQL_ITEMS];
 		sb2	indicator[MAX_SQL_ITEMS],
 		precision ;
+		sb1	scale ;
 		sLOGICAL	isFloat[MAX_SQL_ITEMS];
 		int	col,
 		colNameLen ;
@@ -1446,7 +1461,21 @@ void gHyp_sql_query ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 						(OCIError *) dbproc->errhp  );
 
 						lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
-						isFloat[i] = (dataType == SQLT_NUM && precision > 38) ? TRUE : FALSE ;
+
+						rc = OCIAttrGet(	(dvoid*) mypard, 
+						(ub4) OCI_DTYPE_PARAM, 
+						(dvoid*) &scale,
+						(ub4 *) 0, 
+						(ub4) OCI_ATTR_SCALE, 
+						(OCIError *) dbproc->errhp  );
+						lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
+
+						/* NUMBER(p,s) is a FLOAT when it has digits right of the decimal point (s > 0).
+						 * Scale -127 means no fixed scale: an unconstrained NUMBER, FLOAT(n), or a
+						 * computed column such as AVG(x).  Those can hold fractions, so also FLOAT.
+						 * Otherwise (s <= 0) the value is integral and safe as a LONG.
+						 */
+						isFloat[i] = (dataType == SQLT_NUM && (scale > 0 || scale == -127)) ? TRUE : FALSE ;
 
 						/* Retrieve the data width in characters */
 						rc = OCIAttrGet(	(dvoid*) mypard, 

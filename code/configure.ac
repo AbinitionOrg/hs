@@ -1,66 +1,48 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 #
-AC_PREREQ(2.59)
-AC_INIT([hs],[3.9.3],[support@abinition.com])
-AM_INIT_AUTOMAKE(hs,3.9.3)
+#   autoreconf -fi        (only needed after editing configure.ac or Makefile.am)
+#   ./configure && make && make check && make install
+#
+# Keep the version in step with VERSION_HYPERSCRIPT in hypdef.h.
+#
+AC_PREREQ([2.69])
+AC_INIT([hs],[3.9.5],[support@abinition.com])
+AM_INIT_AUTOMAKE([foreign -Wall -Wno-portability])
+# Build rules that re-run autoconf/automake are off unless --enable-maintainer-mode.
+# git does not preserve timestamps, so without this a fresh checkout tries to
+# regenerate configure and Makefile.in and fails where autotools are absent.
+AM_MAINTAINER_MODE
 AC_CONFIG_SRCDIR([hs.c])
-AM_CONFIG_HEADER(config.h:config.in)
+AC_CONFIG_HEADERS([config.h:config.in])
 
-PACKAGE=hs
-HS_VERSION=3.9.3
 HS_MAJOR=3
 HS_MINOR=9
-HS_RELEASE=3
-
-AC_PROG_INSTALL([/usr/local/bin])
+HS_RELEASE=5
+AC_SUBST([HS_MAJOR])
+AC_SUBST([HS_MINOR])
+AC_SUBST([HS_RELEASE])
 
 # Checks for programs.
 AC_PROG_CC
+AC_PROG_INSTALL
 
-# Checks for libraries.
-# FIXME: Replace `main' with a function in `-lc':
-#AC_CHECK_LIB([c], [main])
-# FIXME: Replace `main' with a function in `-lcrypto':
-#AC_CHECK_LIB([crypto], [main])
-# FIXME: Replace `main' with a function in `-lgd':
-#AC_CHECK_LIB([gd], [main])
-# FIXME: Replace `main' with a function in `-ljpeg':
-#AC_CHECK_LIB([jpeg], [main])
-# FIXME: Replace `main' with a function in `-lm':
-#AC_CHECK_LIB([m], [main])
-# FIXME: Replace `main' with a function in `-lmysqlclient':
-#AC_CHECK_LIB([mysqlclient], [main])
-# FIXME: Replace `main' with a function in `-lssl':
-#AC_CHECK_LIB([ssl], [main])
-# FIXME: Replace `main' with a function in `-lz':
-#AC_CHECK_LIB([z], [main])
+# Checks for libraries (always linked; see LDADD in Makefile.am).
+AC_CHECK_LIB([m], [sqrt], [], [AC_MSG_ERROR([libm is required])])
+AC_CHECK_LIB([z], [deflate], [], [AC_MSG_ERROR([zlib (libz) is required])])
 
 # Checks for header files.
-AC_HEADER_STDC
-AC_HEADER_SYS_WAIT
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h netdb.h netinet/in.h stddef.h stdlib.h string.h sys/file.h sys/ioctl.h sys/socket.h sys/systeminfo.h sys/time.h unistd.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST
 AC_TYPE_PID_T
 AC_TYPE_SIZE_T
-AC_HEADER_TIME
 AC_STRUCT_TM
 AC_TYPE_UID_T
 
 # Checks for library functions.
-AC_FUNC_ERROR_AT_LINE
 AC_FUNC_FORK
-AC_PROG_GCC_TRADITIONAL
-AC_FUNC_MALLOC
-AC_FUNC_MEMCMP
-AC_FUNC_REALLOC
-AC_FUNC_SELECT_ARGTYPES
-AC_TYPE_SIGNAL
-AC_FUNC_STAT
-AC_FUNC_STRFTIME
-AC_FUNC_VPRINTF
 AC_CHECK_FUNCS([alarm bzero dup2 floor gethostbyaddr gethostbyname gethostname gettimeofday inet_ntoa memchr memmove memset mkdir mkfifo pow putenv select setenv socket sqrt strchr strcspn strerror strrchr strspn strstr sysinfo tzset])
 
 AC_CONFIG_FILES([Makefile])
