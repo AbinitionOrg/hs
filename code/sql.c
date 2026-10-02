@@ -501,6 +501,8 @@ void gHyp_sql_bind ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 		sword	rc ; 
     ub2 dt ;
     sb1 scale ;
+    ub2 oraType, oraColLen ;  /* OCI writes ub2/sb2 here, not int */
+    sb2 oraPrecision ;
     OCIStmt    *stmthp;
     OCIParam   *mypard;
 		char	dataBuffer[MAX_SQL_BUFFER_SIZE] ;
@@ -686,19 +688,21 @@ void gHyp_sql_bind ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 
 					rc = OCIAttrGet(	(dvoid*) mypard, 
 					                  (ub4) OCI_DTYPE_PARAM, 
-					                  (dvoid*) &dataType,
+					                  (dvoid*) &oraType,
 					                  (ub4 *) 0, 
 					                  (ub4) OCI_ATTR_DATA_TYPE, 
 					                  (OCIError *) dbproc->errhp  );
 					lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
+					dataType = oraType ;
 
 					rc = OCIAttrGet(	(dvoid*) mypard, 
 					                  (ub4) OCI_DTYPE_PARAM, 
-					                  (dvoid*) &precision,
+					                  (dvoid*) &oraPrecision,
 					                  (ub4 *) 0, 
 					                  (ub4) OCI_ATTR_PRECISION, 
 					                  (OCIError *) dbproc->errhp  );
 					lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
+					precision = oraPrecision ;
 
 					rc = OCIAttrGet(	(dvoid*) mypard, 
 					                  (ub4) OCI_DTYPE_PARAM, 
@@ -718,11 +722,12 @@ void gHyp_sql_bind ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 					/* Retrieve the data width in characters */
 					rc = OCIAttrGet(	(dvoid*) mypard, 
 					                  (ub4) OCI_DTYPE_PARAM, 
-					                  (dvoid*) &colLen, 
+					                  (dvoid*) &oraColLen, 
 					                  (ub4 *) 0, 
 					                  (ub4) OCI_ATTR_DATA_SIZE, 
 					                  (OCIError *) dbproc->errhp  );
 					lHyp_sql_checkErr ( dbproc->errhp, rc ) ;
+					colLen = oraColLen ;
 
 					if ( colLen < VALUE_SIZE ) colLen = VALUE_SIZE ;
 
