@@ -108,6 +108,14 @@ typedef char * LPCSTR;
 #ifdef AS_ORACLE
 #include <oci.h>
 
+/* Renamed in 3.9.5.  The old flag meant "do NOT commit on success", the opposite of
+ * its name, and between 2017 and 3.9.5 the source briefly inverted it.  Stop the build
+ * rather than let an old makefile silently switch a site to auto-commit.
+ */
+#ifdef AS_ORACLE_COMMIT_ON_SUCCESS
+#error "AS_ORACLE_COMMIT_ON_SUCCESS was renamed in HS 3.9.5: use -DAS_ORACLE_NO_COMMIT_ON_SUCCESS for the same behaviour (only an explicit COMMIT statement commits), or remove it to commit every statement on success."
+#endif
+
 /*#define AS_ORACLE_DO_PREPARE2 */
 
 struct oracle_t {
@@ -1262,11 +1270,17 @@ void gHyp_sql_query ( sInstance *pAI, sCode *pCode, sLOGICAL isPARSE )
 
 #endif
 
-			/* We generally do NOT want AS_ORACLE_COMMIT_ON_SUCCESS as it slows down performance for high volumne transactions. */
-#ifdef AS_ORACLE_COMMIT_ON_SUCCESS
-			orientation = isSelect ? OCI_DESCRIBE_ONLY : (isCommit ? OCI_DEFAULT : OCI_COMMIT_ON_SUCCESS ) ;
+			/* Default: every non-SELECT statement commits on success, so a script that never
+			 * issues COMMIT still has its changes saved.
+			 * AS_ORACLE_NO_COMMIT_ON_SUCCESS: statements are left uncommitted and only an
+			 * explicit "commit" statement commits.  Faster for high-volume transactions
+			 * (e.g. TLOGFEED, which issues its own COMMIT).  This is what the build flag
+			 * AS_ORACLE_COMMIT_ON_SUCCESS meant in the 3.9.4 releases run at customer sites.
+			 */
+#ifdef AS_ORACLE_NO_COMMIT_ON_SUCCESS
+			orientation = isSelect ? OCI_DESCRIBE_ONLY : (isCommit ? OCI_COMMIT_ON_SUCCESS : OCI_DEFAULT ) ;
 #else
-			orientation = isSelect ? OCI_DESCRIBE_ONLY : OCI_DEFAULT ;
+			orientation = isSelect ? OCI_DESCRIBE_ONLY : OCI_COMMIT_ON_SUCCESS ;
 #endif
 		}
 		else {
