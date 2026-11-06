@@ -55,7 +55,10 @@
 #include <stdint.h>	/* int32_t def */
 #endif
 #include <stdlib.h>	/* standard library functions */
-#include <time.h> 	/* for localtime function */
+#if HAVE_SYS_TIME_H
+# include <sys/time.h>
+#endif
+#include <time.h>	/* for localtime function */
 #include <errno.h>	/* errno */
 #include <signal.h>	/* signal processing functions and structures */
 #include <assert.h>     /* assert function */
