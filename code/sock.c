@@ -1051,8 +1051,9 @@ HANDLE gHyp_sock_fifo ( char *path,
   if ( stat ( path, &buf ) != -1 && S_ISFIFO ( buf.st_mode ) ) {
     /* Fifo already exists */
     if ( create && alreadyExists ) {
-#ifdef AS_UNIX
-      /* A FIFO nobody reads is stale: its owner was killed or crashed and
+#if defined ( AS_UNIX ) && defined ( __linux__ )
+      /* Linux only for now; Solaris keeps the old behaviour until Mike
+       * decides (it is production there).  A FIFO nobody reads is stale: its owner was killed or crashed and
        * left it behind.  Opening it for writing without blocking fails with
        * ENXIO exactly when no reader exists.  Remove it and create it afresh,
        * rather than failing; the caller would otherwise retry under an ever
@@ -6210,7 +6211,7 @@ static sLOGICAL lHyp_sock_exec (        char *file,
 #else
     if ( (pid = vfork ()) < 0 ) {
 #endif
-      gHyp_util_sysError ( "Problem with vfork - second child" ) ;
+      gHyp_util_sysError ( "Problem with (v)fork - second child" ) ;
       _exit(2) ;  
     }
     else if ( pid > 0 )
