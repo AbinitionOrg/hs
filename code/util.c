@@ -550,8 +550,12 @@ sLOGICAL gHyp_util_log ( char *pStr )
      * If its not a newline, add one.
      * Null terminate and output.
      */
-    pStr += len-1 ;
-    if ( *pStr++ != '\n' ) pBuf[len++] = '\n' ;
+    /* len can be 0 (an empty string): never read the byte before pStr. */
+    {
+      char last = ( len > 0 ) ? pStr[len-1] : '\0' ;
+      pStr += len ;
+      if ( last != '\n' ) pBuf[len++] = '\n' ;
+    }
     pBuf[len++] = '\0' ;
     lHyp_util_output ( gzBuf ) ;
 

@@ -233,9 +233,14 @@ static void lHyp_hyp_trace ( sCode *pCode, sLOGICAL isExecuting )
   
     if ( nextTokenLen > ( MAX_TRACE_LENGTH - lastTokensLen ) )
     
-      /* Cannot append without first trimming from the front of the buffer. */
-      strcpy (	gzTraceBuf, 
-      		gzTraceBuf + MAX ( MAX_TRACE_LENGTH/2, nextTokenLen ) ) ;
+    {
+      /* Cannot append without first trimming from the front of the buffer.
+       * The source and destination overlap, so memmove, never strcpy
+       * (undefined for overlapping strings; AddressSanitizer flags it). */
+      int trim = MAX ( MAX_TRACE_LENGTH/2, nextTokenLen ) ;
+      if ( trim > lastTokensLen ) trim = lastTokensLen ;
+      memmove ( gzTraceBuf, gzTraceBuf + trim, lastTokensLen - trim + 1 ) ;
+    }
     
     /* Append the token */
     strcat ( gzTraceBuf, tokenStr ) ;

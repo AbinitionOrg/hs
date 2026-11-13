@@ -1023,10 +1023,30 @@ HANDLE gHyp_sock_fifo ( char *path,
   if ( stat ( path, &buf ) != -1 && S_ISFIFO ( buf.st_mode ) ) {
     /* Fifo already exists */
     if ( create && alreadyExists ) {
+#ifdef AS_UNIX
+      /* A FIFO nobody reads is stale: its owner was killed or crashed and
+       * left it behind.  Opening it for writing without blocking fails with
+       * ENXIO exactly when no reader exists.  Remove it and create it afresh,
+       * rather than failing; the caller would otherwise retry under an ever
+       * longer name until a buffer overflowed (the router segfaulted on
+       * restart after a kill -9). */
+      int fdStale = open ( path, O_WRONLY | O_NONBLOCK ) ;
+      if ( fdStale == -1 && errno == ENXIO ) {
+        gHyp_util_logWarning ( "Removing stale fifo %s (no reader)", path ) ;
+        unlink ( path ) ;
+      }
+      else {
+        if ( fdStale != -1 ) close ( fdStale ) ;
+        gHyp_util_logError("Fifo %s already exists",path);
+        return INVALID_HANDLE_VALUE ;
+      }
+#else
       gHyp_util_logError("Fifo %s already exists",path);
       return INVALID_HANDLE_VALUE ;
+#endif
     }
-    create = FALSE ;
+    else
+      create = FALSE ;
   }
   else {
     /* Not a fifo, delete it */
@@ -6135,7 +6155,17 @@ static sLOGICAL lHyp_sock_exec (        char *file,
   /* Flush output before we do it */
   if ( gsLog ) fflush ( gsLog ) ;
 
-#ifndef AS_TRU64
+  /* Linux: fork, never vfork, for both forks below.  The first child calls
+   * vfork() again and then _exit(), which is undefined behaviour in a vfork
+   * child (it shares the parent's stack).  On modern glibc that corrupts the
+   * parent's stack: the router exited with status 2 right after spawning
+   * heartbeat, or aborted with "buffer overflow detected" under
+   * _FORTIFY_SOURCE.  fork() is copy-on-write on Linux, so nothing is lost.
+   * Other platforms keep vfork (Solaris reserves swap for a full fork). */
+#if defined ( __linux__ )
+  if ( (pid = fork ()) < 0 )
+    return gHyp_util_sysError ( "Problem with fork" ) ;
+#elif !defined ( AS_TRU64 )
   if ( (pid = vfork ()) < 0 )
     return gHyp_util_sysError ( "Problem with vfork" ) ;
 #else
@@ -6147,7 +6177,11 @@ static sLOGICAL lHyp_sock_exec (        char *file,
         
     /* First child */
 
+#if defined ( __linux__ )
+    if ( (pid = fork ()) < 0 ) {
+#else
     if ( (pid = vfork ()) < 0 ) {
+#endif
       gHyp_util_sysError ( "Problem with vfork - second child" ) ;
       _exit(2) ;  
     }
