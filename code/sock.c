@@ -993,6 +993,34 @@ static HANDLE lHyp_sock_openFifo ( char *path, sLOGICAL isRead, sLOGICAL isWrite
 #endif
 #endif
 
+#if defined ( __linux__ )
+  /* Router only: a larger kernel buffer on its own incoming FIFO.
+   * The router is the street-corner mailbox every process posts into; the
+   * clients' FIFOs are house mailboxes and keep the kernel default (Mike,
+   * 2026-11-13).  Linux defaults a pipe to 64 KB; a full router FIFO makes
+   * every writer sleep and retry.  HS_ROUTER_FIFO_SIZE overrides the size
+   * (bytes, 0 = leave the default).  Failure is a warning, never fatal.
+   * Not compiled on Solaris or VMS. */
+#ifndef F_SETPIPE_SZ
+#define F_SETPIPE_SZ 1031
+#endif
+#ifndef F_GETPIPE_SZ
+#define F_GETPIPE_SZ 1032
+#endif
+  if ( isRead && (guRunFlags & RUN_ROOT) ) {
+    int want = 262144 ;
+    char *pEnv = getenv ( "HS_ROUTER_FIFO_SIZE" ) ;
+    if ( pEnv && *pEnv ) want = atoi ( pEnv ) ;
+    if ( want > 0 ) {
+      if ( fcntl ( s, F_SETPIPE_SZ, want ) == -1 )
+        gHyp_util_logWarning ( "Could not set router FIFO '%s' to %d bytes (errno %d); kernel default kept",
+                               path, want, errno ) ;
+      else
+        gHyp_util_logInfo ( "Router FIFO '%s' buffer is %d bytes", path, fcntl ( s, F_GETPIPE_SZ ) ) ;
+    }
+  }
+#endif
+
   return s ;
 }
   
