@@ -870,6 +870,38 @@ void gHyp_sock_cancelIO ( SOCKET s )
   return ;
 }
 
+#if defined ( __linux__ )
+static void lHyp_sock_fifoSize ( HANDLE s, char *path, sLOGICAL isRead )
+{
+  /* Router only: a larger kernel buffer on its own incoming FIFO.
+   * The router is the street-corner mailbox every process posts into; the
+   * clients' FIFOs are house mailboxes and keep the kernel default (Mike,
+   * 2026-11-13).  Linux defaults a pipe to 64 KB; a full router FIFO makes
+   * every writer sleep and retry.  HS_ROUTER_FIFO_SIZE overrides the size
+   * (bytes, 0 = leave the default).  Failure is a warning, never fatal.
+   * Applied by gHyp_sock_fifo once the FIFO is ours (after the lock).
+   * Not compiled on Solaris or VMS. */
+#ifndef F_SETPIPE_SZ
+#define F_SETPIPE_SZ 1031
+#endif
+#ifndef F_GETPIPE_SZ
+#define F_GETPIPE_SZ 1032
+#endif
+  if ( isRead && (guRunFlags & RUN_ROOT) ) {
+    int want = 262144 ;
+    char *pEnv = getenv ( "HS_ROUTER_FIFO_SIZE" ) ;
+    if ( pEnv && *pEnv ) want = atoi ( pEnv ) ;
+    if ( want > 0 ) {
+      if ( fcntl ( s, F_SETPIPE_SZ, want ) == -1 )
+        gHyp_util_logWarning ( "Could not set router FIFO '%s' to %d bytes (errno %d); kernel default kept",
+                               path, want, errno ) ;
+      else
+        gHyp_util_logInfo ( "Router FIFO '%s' buffer is %d bytes", path, fcntl ( s, F_GETPIPE_SZ ) ) ;
+    }
+  }
+}
+#endif
+
 static HANDLE lHyp_sock_openFifo ( char *path, sLOGICAL isRead, sLOGICAL isWrite )
 {
   /* Open a fifo */
@@ -997,33 +1029,6 @@ static HANDLE lHyp_sock_openFifo ( char *path, sLOGICAL isRead, sLOGICAL isWrite
 #endif
 #endif
 
-#if defined ( __linux__ )
-  /* Router only: a larger kernel buffer on its own incoming FIFO.
-   * The router is the street-corner mailbox every process posts into; the
-   * clients' FIFOs are house mailboxes and keep the kernel default (Mike,
-   * 2026-11-13).  Linux defaults a pipe to 64 KB; a full router FIFO makes
-   * every writer sleep and retry.  HS_ROUTER_FIFO_SIZE overrides the size
-   * (bytes, 0 = leave the default).  Failure is a warning, never fatal.
-   * Not compiled on Solaris or VMS. */
-#ifndef F_SETPIPE_SZ
-#define F_SETPIPE_SZ 1031
-#endif
-#ifndef F_GETPIPE_SZ
-#define F_GETPIPE_SZ 1032
-#endif
-  if ( isRead && (guRunFlags & RUN_ROOT) ) {
-    int want = 262144 ;
-    char *pEnv = getenv ( "HS_ROUTER_FIFO_SIZE" ) ;
-    if ( pEnv && *pEnv ) want = atoi ( pEnv ) ;
-    if ( want > 0 ) {
-      if ( fcntl ( s, F_SETPIPE_SZ, want ) == -1 )
-        gHyp_util_logWarning ( "Could not set router FIFO '%s' to %d bytes (errno %d); kernel default kept",
-                               path, want, errno ) ;
-      else
-        gHyp_util_logInfo ( "Router FIFO '%s' buffer is %d bytes", path, fcntl ( s, F_GETPIPE_SZ ) ) ;
-    }
-  }
-#endif
 
   return s ;
 }
@@ -1052,40 +1057,127 @@ HANDLE gHyp_sock_fifo ( char *path,
     buf ;
 
 #if defined ( __linux__ )
-  sLOGICAL
-    takeOver = FALSE ;
-  s = INVALID_HANDLE_VALUE ;
-#endif
+  {
+    /* Linux.  Solaris and VMS keep the original code below (#else),
+     * unchanged, until Mike decides (it is production there).
+     *
+     * An inbox (create && alreadyExists: a process making its own input
+     * FIFO) is OWNED by whoever holds an exclusive flock() on it.  The lock
+     * belongs to the open descriptor, which is close-on-exec, so it goes
+     * away by itself when the owner exits, however it exits.
+     *
+     * The inbox path never unlinks.  mkfifo() tolerates EEXIST, the FIFO is
+     * opened directly (not through lHyp_sock_openFifo, which unlinks the
+     * path when an open fails), and the lock decides ownership:
+     *  - a FIFO left by a killed owner has no lock, so it is reused in
+     *    place instead of failing (the caller used to retry under an ever
+     *    longer name until a buffer overflowed: the router segfaulted on
+     *    restart after a kill -9);
+     *  - two processes starting together cannot delete each other's FIFO;
+     *    both open the same one and exactly one gets the lock.
+     * (Second-agent reviews, 2026-11-16.) */
+    sLOGICAL
+      isInbox = ( create && alreadyExists ),
+      madeIt = FALSE ;
+    int
+      flags,
+      rc,
+      tries ;
 
+    s = INVALID_HANDLE_VALUE ;
+
+    if ( stat ( path, &buf ) != -1 && !S_ISFIFO ( buf.st_mode ) ) {
+      /* Not a fifo, delete it */
+      unlink ( path ) ;
+    }
+
+    if ( !isInbox ) {
+      /* Someone else's FIFO, or our own outbox/loopback: as before, except
+       * that a missing path is not unlinked first (that unlink could only
+       * ever remove a FIFO another process had just made). */
+      if ( create &&
+           ( stat ( path, &buf ) == -1 || !S_ISFIFO ( buf.st_mode ) ) ) {
+        gHyp_util_logInfo("Making Fifo %s",path);
+        if ( mkfifo ( path, ( S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH ) ) == -1 &&
+             errno != EEXIST ) {
+          gHyp_util_sysError ( "Failed to create  FIFO '%s'", path ) ;
+          return INVALID_HANDLE_VALUE ;
+        }
+      }
+      s = lHyp_sock_openFifo ( path, isRead, isWrite ) ;
+      if ( s != INVALID_HANDLE_VALUE ) lHyp_sock_fifoSize ( s, path, isRead ) ;
+      return s ;
+    }
+
+    if ( isRead && isWrite ) flags = O_RDWR | O_NONBLOCK ;
+    else if ( isRead )       flags = O_RDONLY | O_NONBLOCK ;
+    else if ( isWrite )      flags = O_WRONLY | O_NONBLOCK ;
+    else return INVALID_HANDLE_VALUE ;
+
+    /* Make it if needed, then open it.  If it vanishes between the two
+     * (another process removed it), make it once more: never a loop. */
+    for ( tries = 0 ; tries < 2 && s == INVALID_HANDLE_VALUE ; tries++ ) {
+      if ( mkfifo ( path, ( S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH ) ) == 0 ) {
+        gHyp_util_logInfo("Making Fifo %s",path);
+        madeIt = TRUE ;
+      }
+      else if ( errno != EEXIST ) {
+        gHyp_util_sysError ( "Failed to create  FIFO '%s'", path ) ;
+        return INVALID_HANDLE_VALUE ;
+      }
+      do s = open ( path, flags ) ; while ( s == -1 && errno == EINTR ) ;
+      if ( s == -1 ) {
+        s = INVALID_HANDLE_VALUE ;
+        if ( errno != ENOENT ) {
+          gHyp_util_sysError ( "Failed to open FIFO '%s'", path ) ;
+          return INVALID_HANDLE_VALUE ;
+        }
+      }
+    }
+    if ( s == INVALID_HANDLE_VALUE ) {
+      gHyp_util_logError ( "Fifo %s was removed twice while opening it", path ) ;
+      return INVALID_HANDLE_VALUE ;
+    }
+    if ( fstat ( s, &buf ) == -1 || !S_ISFIFO ( buf.st_mode ) ) {
+      gHyp_util_logError ( "'%s' is not a fifo", path ) ;
+      close ( s ) ;
+      return INVALID_HANDLE_VALUE ;
+    }
+    if ( fcntl ( s, F_SETFD, FD_CLOEXEC ) == -1 ) {
+      gHyp_util_sysError ( "Failed to F_SETFD (FD_CLOEXEC) on FIFO" ) ;
+      close ( s ) ;
+      return INVALID_HANDLE_VALUE ;
+    }
+
+    /* Claim it. */
+    do rc = flock ( s, LOCK_EX | LOCK_NB ) ; while ( rc == -1 && errno == EINTR ) ;
+    if ( rc == -1 ) {
+      if ( errno == EWOULDBLOCK ) {
+        /* A live owner has it: the original behaviour. */
+        gHyp_util_logError("Fifo %s already exists",path);
+        close ( s ) ;
+        return INVALID_HANDLE_VALUE ;
+      }
+      /* The filesystem cannot lock (NFS without locking, say).  Not a
+       * reason to refuse to start: carry on without the ownership check. */
+      gHyp_util_logWarning ( "Cannot lock fifo %s (errno %d); continuing without an ownership check",
+                             path, errno ) ;
+    }
+    else if ( !madeIt )
+      gHyp_util_logWarning ( "Reusing existing fifo %s (no live owner)", path ) ;
+
+    lHyp_sock_fifoSize ( s, path, isRead ) ;
+    return s ;
+  }
+#else
   /* Check to see if fifo already exists */
   if ( stat ( path, &buf ) != -1 && S_ISFIFO ( buf.st_mode ) ) {
     /* Fifo already exists */
     if ( create && alreadyExists ) {
-#if defined ( AS_UNIX ) && defined ( __linux__ )
-      /* Linux only for now; Solaris keeps the old behaviour until Mike
-       * decides (it is production there).
-       *
-       * An inbox FIFO is owned by whoever holds an exclusive flock() on it
-       * (taken below, after the open, for every inbox this process creates).
-       * A FIFO left behind by an owner that was killed or crashed has no
-       * lock, so we reuse it in place rather than failing; the caller would
-       * otherwise retry under an ever longer name until a buffer overflowed
-       * (the router segfaulted on restart after a kill -9).
-       *
-       * Reusing in place, instead of unlink + mkfifo, means two processes
-       * starting together can never delete each other's live FIFO: both
-       * open it, exactly one gets the lock, the other is told it exists.
-       * No probe-open for writing either, so a live owner never sees a
-       * spurious EOF (second-agent review, 2026-11-16). */
-      create = FALSE ;
-      takeOver = TRUE ;
-#else
       gHyp_util_logError("Fifo %s already exists",path);
       return INVALID_HANDLE_VALUE ;
-#endif
     }
-    else
-      create = FALSE ;
+    create = FALSE ;
   }
   else {
     /* Not a fifo, delete it */
@@ -1093,59 +1185,17 @@ HANDLE gHyp_sock_fifo ( char *path,
     unlink ( path ) ;
   }
 
-#if defined ( __linux__ )
-  if ( takeOver ) {
-    /* Reuse the existing FIFO.  If it vanished between the stat() and the
-     * open (another process removed it), make a new one instead: once,
-     * never in a loop. */
-    s = lHyp_sock_openFifo ( path, isRead, isWrite ) ;
-    if ( s == INVALID_HANDLE_VALUE ) create = TRUE ;
-  }
-#endif
-
   if ( create ) {
 
     gHyp_util_logInfo("Making Fifo %s",path);
 
     /* FIFO does not exist - create it */
     if ( mkfifo ( path, ( S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH ) ) == -1 ) {
-#if defined ( __linux__ )
-      /* Linux: another process created it first.  Not fatal; the lock
-       * below decides which of us owns it. */
-      if ( errno != EEXIST || !alreadyExists ) {
-        gHyp_util_sysError ( "Failed to create  FIFO '%s'", path ) ;
-        return INVALID_HANDLE_VALUE ;
-      }
-#else
       gHyp_util_sysError ( "Failed to create  FIFO '%s'", path ) ;
       return INVALID_HANDLE_VALUE ;
-#endif
     }
   }
 
-#if defined ( __linux__ )
-  /* Now open it, unless the take-over above already did. */
-  if ( !takeOver || create ) s = lHyp_sock_openFifo ( path, isRead, isWrite ) ;
-
-  if ( s != INVALID_HANDLE_VALUE && alreadyExists ) {
-    /* We are creating our own inbox: claim it.  The lock lives as long as
-     * this descriptor (close-on-exec is already set), so it goes away by
-     * itself when the owner exits, however it exits. */
-    int rc ;
-    do rc = flock ( s, LOCK_EX | LOCK_NB ) ; while ( rc == -1 && errno == EINTR ) ;
-    if ( rc == -1 ) {
-      if ( errno == EWOULDBLOCK )
-        gHyp_util_logError("Fifo %s already exists",path);
-      else
-        gHyp_util_sysError ( "Failed to lock FIFO '%s'", path ) ;
-      close ( s ) ;
-      return INVALID_HANDLE_VALUE ;
-    }
-    if ( takeOver && !create )
-      gHyp_util_logWarning ( "Reusing stale fifo %s (its owner had exited)", path ) ;
-  }
-  return s ;
-#else
   /* Now open it */
   return lHyp_sock_openFifo ( path, isRead, isWrite ) ;
 #endif
