@@ -983,9 +983,17 @@ static HANDLE lHyp_sock_openFifo ( char *path, sLOGICAL isRead, sLOGICAL isWrite
 #ifdef AS_UNIX
   /* Check to see if fifo already exists */
   if ( stat ( path, &buf ) == -1 || !S_ISFIFO ( buf.st_mode ) )  {
+#if defined ( __linux__ )
+    /* Linux: remove only something that exists and is not a fifo.  A
+     * missing path has nothing to remove, and an unlink there could only
+     * hit a fifo another process had just made. */
+    if ( stat ( path, &buf ) != -1 && !S_ISFIFO ( buf.st_mode ) )
+      unlink ( path ) ;
+#else
     /* Not a fifo, delete it */
     /*gHyp_util_logInfo ( "Removing '%s'",path ) ;*/
     unlink ( path ) ;
+#endif
     return INVALID_HANDLE_VALUE ; 
   }
 #endif
@@ -993,7 +1001,13 @@ static HANDLE lHyp_sock_openFifo ( char *path, sLOGICAL isRead, sLOGICAL isWrite
   if ( (s = open ( path, flags) ) == INVALID_HANDLE_VALUE ) {
     if ( errno != ENXIO )
       gHyp_util_sysError ( "Failed to open FIFO '%s'", path ) ;
-#ifdef AS_UNIX
+#if defined ( AS_UNIX ) && defined ( __linux__ )
+    /* Linux: never delete a fifo because an open failed.  ENXIO (no
+     * reader) is exactly what a writer sees on a dead owner's fifo, and the
+     * new owner reuses that fifo in place (gHyp_sock_fifo); an unlink here
+     * could remove it just after the new owner had taken it over (third
+     * second-agent review, 2026-11-16). */
+#elif defined ( AS_UNIX )
     /*gHyp_util_logInfo ( "Removing '%s'",path ) ;*/
     unlink ( path ) ;
 #endif
@@ -1028,7 +1042,6 @@ static HANDLE lHyp_sock_openFifo ( char *path, sLOGICAL isRead, sLOGICAL isWrite
 #endif
 #endif
 #endif
-
 
   return s ;
 }
@@ -1104,14 +1117,14 @@ HANDLE gHyp_sock_fifo ( char *path,
           return INVALID_HANDLE_VALUE ;
         }
       }
-      s = lHyp_sock_openFifo ( path, isRead, isWrite ) ;
-      if ( s != INVALID_HANDLE_VALUE ) lHyp_sock_fifoSize ( s, path, isRead ) ;
-      return s ;
+      return lHyp_sock_openFifo ( path, isRead, isWrite ) ;
     }
 
-    if ( isRead && isWrite ) flags = O_RDWR | O_NONBLOCK ;
-    else if ( isRead )       flags = O_RDONLY | O_NONBLOCK ;
-    else if ( isWrite )      flags = O_WRONLY | O_NONBLOCK ;
+    /* O_CLOEXEC: close-on-exec from the moment it is open, so no child
+     * that execs can ever inherit the lock. */
+    if ( isRead && isWrite ) flags = O_RDWR | O_NONBLOCK | O_CLOEXEC ;
+    else if ( isRead )       flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC ;
+    else if ( isWrite )      flags = O_WRONLY | O_NONBLOCK | O_CLOEXEC ;
     else return INVALID_HANDLE_VALUE ;
 
     /* Make it if needed, then open it.  If it vanishes between the two
@@ -1140,11 +1153,6 @@ HANDLE gHyp_sock_fifo ( char *path,
     }
     if ( fstat ( s, &buf ) == -1 || !S_ISFIFO ( buf.st_mode ) ) {
       gHyp_util_logError ( "'%s' is not a fifo", path ) ;
-      close ( s ) ;
-      return INVALID_HANDLE_VALUE ;
-    }
-    if ( fcntl ( s, F_SETFD, FD_CLOEXEC ) == -1 ) {
-      gHyp_util_sysError ( "Failed to F_SETFD (FD_CLOEXEC) on FIFO" ) ;
       close ( s ) ;
       return INVALID_HANDLE_VALUE ;
     }
